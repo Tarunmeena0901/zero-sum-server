@@ -21,7 +21,6 @@ async function main() {
         },
     });
 
-    // Handle incoming connections with Socket.io
     io.on('connection', (socket) => {
         console.log('A client connected');
 
