@@ -4,10 +4,14 @@ import { Server } from 'socket.io';
 import { io as Client } from 'socket.io-client';
 import { signPayload } from './auth';
 import { Env } from './environment';
-import { AuthTokenPayload, GameEndedEvent, GameStartedEvent, StartGameEvent, Winners } from './models';
+import { AuthTokenPayload, GameEndedEvent, GameStartedEvent, StartGameEvent, StartGamePayload, TeamScore, Winners } from './models';
+import { Socket } from 'socket.io';
 
 async function main() {
     const startedGames = new Set<string>();
+    const runningGames: {
+        [gameId: string]: GameStartedEvent
+    } = {}
 
     const app = express();
 
@@ -21,20 +25,30 @@ async function main() {
         },
     });
 
-    io.on('connection', (socket) => {
-        console.log('A client connected');
+    io.on('connection', (gameSocket: Socket) => {
+        console.log('A game client connected');
+        gameSocket.emit("connected", "you are connected to master server");
 
         async function waitForResult(matchId: string): Promise<Winners> {
             return new Promise<Winners>((resolve) => {
-                socket.on('matchResult', (result: GameEndedEvent) => {
+                gameSocket.on('matchResult', (result: any) => {
+                    let winners: { [key: number]: TeamScore } = {};
+                    result.winners.forEach((team: TeamScore, i: number) => {
+                        winners[i] = team;
+                    });
                     if (result.matchId === matchId) {
-                        resolve(result.winners);
+                        resolve(winners);
                     }
                 });
             });
         }
 
-        socket.on('startGame', async (payload: unknown) => {
+        client.on('startGame', (data: StartGameEvent) => {
+            const parsedData = StartGameEvent.parse(data);
+            gameSocket.emit("startGame",parsedData);
+        });
+
+        gameSocket.on('gameStarted', async (payload: unknown) => {
             const parsedPayload = StartGameEvent.parse(payload);
             console.log('start game', parsedPayload.games);
 
@@ -43,8 +57,8 @@ async function main() {
                     if (!startedGames.has(game.matchId)) {
                         startedGames.add(game.matchId);
 
-                        // Notify ZeroSum API about the started game
-                        await client.emit(
+                        //Notify ZeroSum API about the started game
+                        client.emit(
                             'gameStarted',
                             GameStartedEvent.parse({
                                 matchId: game.matchId,
@@ -52,26 +66,33 @@ async function main() {
                                 timestamp: Math.floor(Date.now()),
                             } satisfies GameStartedEvent),
                         );
+                        gameSocket.emit("startInfo","zero sum is informed about the game started event");
 
                         // Wait for the match result
-                        const winners = await waitForResult(game.matchId);
+                        const winnerTeams = await waitForResult(game.matchId);
+                        gameSocket.emit("resultInfo","master server recieved the game results");
 
-                        // Notify ZeroSum API about the game ended
-                        await client.emit(
+                        //Notify ZeroSum API about the game ended
+                        client.emit(
                             'gameEnded',
                             GameEndedEvent.parse({
-                                winners,
+                                winners: winnerTeams,
                                 matchId: game.matchId,
+                                tournamentId: game.tournamentId ?? game.tournamentId
                             } satisfies GameEndedEvent),
                         );
+                        startedGames.delete(game.matchId);
+                        delete runningGames[game.matchId];
+                        gameSocket.emit("endInfo","zero sum is informed about the game ended event");
                     } else {
                         console.log(`${game.matchId} already started`);
+                        gameSocket.emit(`${game.matchId} already started`)
                     }
                 }),
             );
         });
 
-        socket.on('disconnect', (reason) => {
+        gameSocket.on('disconnect', (reason) => {
             console.log(`Client disconnected: ${reason}`);
         });
     });
@@ -85,6 +106,12 @@ async function main() {
     client.on('connect', () => {
         console.log('Connected to Game API');
     });
+
+    // client.on('startGame', (data: StartGameEvent) => {
+    //     const parsedData = StartGamePayload.parse(data)
+    //     gameSocket.emit("startGame", )
+    //     console.log(parsedData);
+    // });
 
     client.on('disconnect', (reason) => {
         console.log(`Disconnected from Game API: ${reason}`);

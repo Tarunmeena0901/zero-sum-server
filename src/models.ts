@@ -17,13 +17,13 @@ export const TeamScore = z.object({
     scores: z.number().array(),
 });
 export type TeamScore = z.infer<typeof TeamScore>;
-export const Winners = z.record(z.number(), TeamScore);
+export const Winners = z.record(z.string(), TeamScore);
 export type Winners = z.infer<typeof Winners>
 
 export const GameEndedEvent = z.object({
     matchId: MatchId,
     tournamentId: z.string().optional(),
-    winners: z.record(z.number(), TeamScore)
+    winners: z.record(z.string(), TeamScore)
 });
 export type GameEndedEvent = z.infer<typeof GameEndedEvent>;
 export const GameStartedEvent = z.object({
